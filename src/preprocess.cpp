@@ -182,7 +182,7 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
           // if(fabs(pl_full[i].curvature - pl_full[i - 1].curvature) > 1.0) ROS_ERROR("time jump: %f", fabs(pl_full[i].curvature - pl_full[i - 1].curvature));
           pl_full[i].curvature = fabs(pl_full[i].curvature - pl_full[i - 1].curvature) < 1.0
                                      ? pl_full[i].curvature
-                                     : pl_full[i - 1].curvature + 0.004166667f; // float(100/24000)
+                                     : pl_full[i - 1].curvature + 0.004166667f; // float(100/24000) //! 这是专门用于avia的参数，如果是mid360应该需要修改
         }
 
         if (valid_num % point_filter_num == 0)

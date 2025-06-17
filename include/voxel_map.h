@@ -182,6 +182,12 @@ public:
   VoxelOctoTree *Insert(const pointWithVar &pv);
 };
 
+/**
+ * @brief 从ROS参数服务器加载体素地图配置
+ * 
+ * @param nh 
+ * @param voxel_config 
+ */
 void loadVoxelConfig(ros::NodeHandle &nh, VoxelMapConfig &voxel_config);
 
 class VoxelMapManager
