@@ -128,6 +128,7 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, StatesGroup &state_inout, in
     cur_acc << imu_acc.x, imu_acc.y, imu_acc.z;
     cur_gyr << gyr_acc.x, gyr_acc.y, gyr_acc.z;
 
+    //! 这里只做了增量均值计算，没算协方差
     mean_acc += (cur_acc - mean_acc) / N;
     mean_gyr += (cur_gyr - mean_gyr) / N;
 
@@ -143,6 +144,7 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, StatesGroup &state_inout, in
   IMU_mean_acc_norm = mean_acc.norm();
   state_inout.gravity = -mean_acc / mean_acc.norm() * G_m_s2;
   state_inout.rot_end = Eye3d; // Exp(mean_acc.cross(V3D(0, 0, -1 / scale_gravity)));
+  //! bg设为0，没有角速度均值
   state_inout.bias_g = Zero3d; // mean_gyr;
 
   last_imu = meas.imu.back();
@@ -163,6 +165,7 @@ void ImuProcess::Forward_without_imu(LidarMeasureGroup &meas, StatesGroup &state
 
   if (b_first_frame)
   {
+    // 假定就是10hz的lidar
     dt = 0.1;
     b_first_frame = false;
   }
@@ -180,6 +183,7 @@ void ImuProcess::Forward_without_imu(LidarMeasureGroup &meas, StatesGroup &state
 
   /* covariance propagation */
   // M3D acc_avr_skew;
+  // 加速度就用bg
   M3D Exp_f = Exp(state_inout.bias_g, dt);
 
   F_x.setIdentity();
@@ -210,6 +214,7 @@ void ImuProcess::Forward_without_imu(LidarMeasureGroup &meas, StatesGroup &state
   state_inout.rot_end = state_inout.rot_end * Exp_f;
   state_inout.pos_end = state_inout.pos_end + state_inout.vel_end * dt;
 
+  // 点云去畸变
   if (lidar_type != L515)
   {
     auto it_pcl = pcl_out.points.end() - 1;
@@ -234,6 +239,7 @@ void ImuProcess::Forward_without_imu(LidarMeasureGroup &meas, StatesGroup &state
 }
 
 
+//! 感觉flag=vio时没必要进去处理
 void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out)
 {
   double t0 = omp_get_wtime();
@@ -250,6 +256,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   // printf("[ IMU ] IMU data sequence size: %zu \n", meas.imu.size());
   // printf("[ IMU ] lidar_scan_index_now: %d \n", lidar_meas.lidar_scan_index_now);
 
+  // 其实两个时间都是图像的时间戳
   const double prop_end_time = lidar_meas.lio_vio_flg == LIO ? meas.lio_time : meas.vio_time;
 
   /*** cut lidar point based on the propagation-start time and required
@@ -303,6 +310,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   double offs_t;
   // double imu_time;
   double tau;
+  //! 这里其实就是将tau状态量初始化为1，同时也不参与预测步的计算
   if (!imu_time_init)
   {
     // imu_time = v_imu.front()->header.stamp.toSec() - first_lidar_time;
@@ -319,6 +327,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
 
   // ROS_ERROR("lidar_meas.lio_vio_flg");
   // cout<<"lidar_meas.lio_vio_flg: "<<lidar_meas.lio_vio_flg<<endl;
+  //! flag = vio时，没有IMU数据，所以其实只有在lio时才会向前传播 
   switch (lidar_meas.lio_vio_flg)
   {
   case LIO:
@@ -491,6 +500,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
 
   /*** undistort each lidar point (backward propagation), ONLY working for LIO
    * update ***/
+  // 点云去畸变
   if (lidar_meas.lio_vio_flg == LIO)
   {
     auto it_pcl = pcl_wait_proc.points.end() - 1;
@@ -545,6 +555,7 @@ void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, Poin
   double t1, t2, t3;
   t1 = omp_get_wtime();
   ROS_ASSERT(lidar_meas.lidar != nullptr);
+  // 没使用IMU时，就只依赖当前状态向前传播，并做去畸变
   if (!imu_en)
   {
     Forward_without_imu(lidar_meas, stat, *cur_pcl_un_);
@@ -555,7 +566,7 @@ void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, Poin
 
   if (imu_need_init)
   {
-    double pcl_end_time = lidar_meas.lio_vio_flg == LIO ? meas.lio_time : meas.vio_time;
+    // double pcl_end_time = lidar_meas.lio_vio_flg == LIO ? meas.lio_time : meas.vio_time;
     // lidar_meas.last_lio_update_time = pcl_end_time;
 
     if (meas.imu.empty()) { return; };
@@ -568,6 +579,8 @@ void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, Poin
 
     if (init_iter_num > MAX_INI_COUNT)
     {
+      //! 没计算协方差，尺度差异也就不用补偿了
+      //! cov_acc和cov_gyr与fast-lio一致，直接设置为传入参数
       // cov_acc *= pow(G_m_s2 / mean_acc.norm(), 2);
       imu_need_init = false;
       ROS_INFO("IMU Initials: Gravity: %.4f %.4f %.4f %.4f; acc covarience: "

@@ -124,6 +124,14 @@ struct DS_POINT
   int count = 0;
 };
 
+/**
+ * @brief 计算lidar点在lidar系下的协方差
+ * 
+ * @param pb 
+ * @param range_inc 距离测量的标准差(1σ)，m
+ * @param degree_inc 角度测量的标准差(1σ)，deg
+ * @param cov
+ */
 void calcBodyCov(Eigen::Vector3d &pb, const float range_inc, const float degree_inc, Eigen::Matrix3d &cov);
 
 class VoxelOctoTree
@@ -174,6 +182,10 @@ public:
     delete plane_ptr_;
   }
   void init_plane(const std::vector<pointWithVar> &points, VoxelPlane *plane);
+  /**
+   * @brief 当体素中点云数量达到一定阈值时，初始化这个体素
+   * 
+   */
   void init_octo_tree();
   void cut_octo_tree();
   void UpdateOctoTree(const pointWithVar &pv);
@@ -236,6 +248,10 @@ public:
   void TransformLidar(const Eigen::Matrix3d rot, const Eigen::Vector3d t, const PointCloudXYZI::Ptr &input_cloud,
                       pcl::PointCloud<pcl::PointXYZI>::Ptr &trans_cloud);
 
+  /**
+   * @brief 用第一帧点云初始化voxel地图
+   * 
+   */
   void BuildVoxelMap();
   V3F RGBFromVoxel(const V3D &input_point);
 

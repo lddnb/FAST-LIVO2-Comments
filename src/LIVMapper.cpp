@@ -248,6 +248,7 @@ void LIVMapper::processImu()
 {
   // double t0 = omp_get_wtime();
 
+  // IMU状态传播和点云去畸变
   p_imu->Process2(LidarMeasures, _state, feats_undistort);
 
   if (gravity_align_en) gravityAlignment();
@@ -347,6 +348,7 @@ void LIVMapper::handleLIO()
 
   double t0 = omp_get_wtime();
 
+  // 降采样
   downSizeFilterSurf.setInputCloud(feats_undistort);
   downSizeFilterSurf.filter(*feats_down_body);
   
@@ -358,6 +360,7 @@ void LIVMapper::handleLIO()
   voxelmap_manager->feats_down_world_ = feats_down_world;
   voxelmap_manager->feats_down_size_ = feats_down_size;
   
+  // 初始化voxel地图
   if (!lidar_map_inited) 
   {
     lidar_map_inited = true;
@@ -546,8 +549,10 @@ void LIVMapper::run()
       rate.sleep();
       continue;
     }
+    // 处理第一帧
     handleFirstFrame();
 
+    // 处理IMU
     processImu();
 
     // if (!p_imu->imu_time_init) continue;
