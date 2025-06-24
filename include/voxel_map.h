@@ -181,12 +181,22 @@ public:
     }
     delete plane_ptr_;
   }
+  /**
+   * @brief 尝试拟合平面，计算特征值、特征向量和协方差
+   * 
+   * @param points 
+   * @param plane 
+   */
   void init_plane(const std::vector<pointWithVar> &points, VoxelPlane *plane);
   /**
    * @brief 当体素中点云数量达到一定阈值时，初始化这个体素
    * 
    */
   void init_octo_tree();
+  /**
+   * @brief 递归分割子节点
+   * 
+   */
   void cut_octo_tree();
   void UpdateOctoTree(const pointWithVar &pv);
 
@@ -211,12 +221,12 @@ public:
   ros::Publisher voxel_map_pub_;
   std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> voxel_map_;
 
-  PointCloudXYZI::Ptr feats_undistort_;
-  PointCloudXYZI::Ptr feats_down_body_;
-  PointCloudXYZI::Ptr feats_down_world_;
+  PointCloudXYZI::Ptr feats_undistort_;           // 点云去畸变后、降采样前，在Lidar系下的点云
+  PointCloudXYZI::Ptr feats_down_body_;           // 点云降采样后，在Lidar系下的点云
+  PointCloudXYZI::Ptr feats_down_world_;          // 点云降采样后，在World系下的点云
 
-  M3D extR_;
-  V3D extT_;
+  M3D extR_;                                      // lidar到IMU的旋转外参 R_imu2lidar
+  V3D extT_;                                      // lidar到IMU的平移外参 t_imu2lidar
   float build_residual_time, ekf_time;
   float ave_build_residual_time = 0.0;
   float ave_ekf_time = 0.0;
@@ -244,6 +254,11 @@ public:
     feats_down_world_.reset(new PointCloudXYZI());
   };
 
+  /**
+   * @brief IESKF的更新步骤
+   * 
+   * @param state_propagat IMU传播之后的状态量
+   */
   void StateEstimation(StatesGroup &state_propagat);
   void TransformLidar(const Eigen::Matrix3d rot, const Eigen::Vector3d t, const PointCloudXYZI::Ptr &input_cloud,
                       pcl::PointCloud<pcl::PointXYZI>::Ptr &trans_cloud);
@@ -257,8 +272,24 @@ public:
 
   void UpdateVoxelMap(const std::vector<pointWithVar> &input_points);
 
+  /**
+   * @brief 构建点面残差约束，使用OMP并行化加速
+   * 
+   * @param pv_list 
+   * @param ptpl_list 
+   */
   void BuildResidualListOMP(std::vector<pointWithVar> &pv_list, std::vector<PointToPlane> &ptpl_list);
 
+  /**
+   * @brief 从根节点开始递归搜索一个体素，构建与当前点云的点面残差约束
+   * 
+   * @param pv 
+   * @param current_octo 
+   * @param current_layer 
+   * @param is_sucess 
+   * @param prob 
+   * @param single_ptpl 
+   */
   void build_single_residual(pointWithVar &pv, const VoxelOctoTree *current_octo, const int current_layer, bool &is_sucess, double &prob,
                              PointToPlane &single_ptpl);
 

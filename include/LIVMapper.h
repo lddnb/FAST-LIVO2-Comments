@@ -109,7 +109,7 @@ public:
    */
   void imu_prop_callback(const ros::TimerEvent &e);
   /**
-   * @brief 根据R和t对雷达系下的点云做变换，R和t是T_world2imu，其中自动lidar2imu的变换
+   * @brief 根据R和t对雷达系下的点云做变换，R和t是T_world2imu，其中自动做了lidar2imu的变换，因为一般是在用lidar系的点云，转到world系下就用这个函数
    * 
    * @param rot 
    * @param t 
@@ -238,10 +238,10 @@ public:
   double IMG_POINT_COV;                           // 图像特征点协方差，即权重
 
   PointCloudXYZI::Ptr visual_sub_map;             // 视觉地图点云
-  PointCloudXYZI::Ptr feats_undistort;            // 点云去畸变后、降采样前的点云
-  PointCloudXYZI::Ptr feats_down_body;            // 点云降采样后、在IMU坐标系下的点云
-  PointCloudXYZI::Ptr feats_down_world;           // 点云降采样后、在世界坐标系下的点云
-  PointCloudXYZI::Ptr pcl_w_wait_pub;             // 一帧处理完之后的世界坐标系下的点云
+  PointCloudXYZI::Ptr feats_undistort;            // 点云去畸变后、降采样前，在Lidar系下的点云
+  PointCloudXYZI::Ptr feats_down_body;            // 点云降采样后，在Lidar系下的点云
+  PointCloudXYZI::Ptr feats_down_world;           // 点云降采样后，在World系下的点云
+  PointCloudXYZI::Ptr pcl_w_wait_pub;             // 一帧处理完之后的World系下的点云
   PointCloudXYZI::Ptr pcl_wait_pub;               // 发布函数中的一个临时变量
   PointCloudXYZRGB::Ptr pcl_wait_save;            // 用于保存的点云
   PointCloudXYZI::Ptr pcl_wait_save_intensity;    // 没图像时用于保存的强度点云

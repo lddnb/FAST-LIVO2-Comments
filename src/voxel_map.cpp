@@ -23,11 +23,14 @@ void calcBodyCov(Eigen::Vector3d &pb, const float range_inc, const float degree_
   direction.normalize();
   Eigen::Matrix3d direction_hat;
   direction_hat << 0, -direction(2), direction(1), direction(2), 0, -direction(0), -direction(1), direction(0), 0;
+  // 设计的一个基底向量1，与方向向量垂直
   Eigen::Vector3d base_vector1(1, 1, -(direction(0) + direction(1)) / direction(2));
   base_vector1.normalize();
+  // 用叉乘得到一个与基底向量1和方向向量垂直的基底向量2
   Eigen::Vector3d base_vector2 = base_vector1.cross(direction);
   base_vector2.normalize();
   Eigen::Matrix<double, 3, 2> N;
+  // 两个基底向量组成得到 N
   N << base_vector1(0), base_vector2(0), base_vector1(1), base_vector2(1), base_vector1(2), base_vector2(2);
   Eigen::Matrix<double, 3, 2> A = range * direction_hat * N;
   cov = direction * range_var * direction.transpose() + A * direction_var * A.transpose();
@@ -60,6 +63,8 @@ void VoxelOctoTree::init_plane(const std::vector<pointWithVar> &points, VoxelPla
   plane->normal_ = Eigen::Vector3d::Zero();
   plane->points_size_ = points.size();
   plane->radius_ = 0;
+
+  // 计算点云质心和协方差矩阵
   for (auto pv : points)
   {
     plane->covariance_ += pv.point_w * pv.point_w.transpose();
@@ -67,6 +72,8 @@ void VoxelOctoTree::init_plane(const std::vector<pointWithVar> &points, VoxelPla
   }
   plane->center_ = plane->center_ / plane->points_size_;
   plane->covariance_ = plane->covariance_ / plane->points_size_ - plane->center_ * plane->center_.transpose();
+
+  // 对协方差矩阵做特征值分解
   Eigen::EigenSolver<Eigen::Matrix3d> es(plane->covariance_);
   Eigen::Matrix3cd evecs = es.eigenvectors();
   Eigen::Vector3cd evals = es.eigenvalues();
@@ -79,14 +86,18 @@ void VoxelOctoTree::init_plane(const std::vector<pointWithVar> &points, VoxelPla
   Eigen::Vector3d evecMin = evecs.real().col(evalsMin);
   Eigen::Vector3d evecMid = evecs.real().col(evalsMid);
   Eigen::Vector3d evecMax = evecs.real().col(evalsMax);
+  // 质心对点云的雅克比，∂q/∂p = diag(1/N, 1/N, 1/N)
   Eigen::Matrix3d J_Q;
   J_Q << 1.0 / plane->points_size_, 0, 0, 0, 1.0 / plane->points_size_, 0, 0, 0, 1.0 / plane->points_size_;
   // && evalsReal(evalsMid) > 0.05
   //&& evalsReal(evalsMid) > 0.01
+  
+  // 最小特征值小于阈值，则认为可以拟合平面
   if (evalsReal(evalsMin) < planer_threshold_)
   {
     for (int i = 0; i < points.size(); i++)
     {
+      // 计算法向量对点云的雅克比，∂q/∂p = U*F，和论文一致
       Eigen::Matrix<double, 6, 3> J;
       Eigen::Matrix3d F;
       for (int m = 0; m < 3; m++)
@@ -107,19 +118,24 @@ void VoxelOctoTree::init_plane(const std::vector<pointWithVar> &points, VoxelPla
       }
       J.block<3, 3>(0, 0) = evecs.real() * F;
       J.block<3, 3>(3, 0) = J_Q;
+      // 传播得到平面的协方差矩阵
       plane->plane_var_ += J * points[i].var * J.transpose();
     }
 
+    // 把特征值和特征向量都存下来
     plane->normal_ << evecs.real()(0, evalsMin), evecs.real()(1, evalsMin), evecs.real()(2, evalsMin);
     plane->y_normal_ << evecs.real()(0, evalsMid), evecs.real()(1, evalsMid), evecs.real()(2, evalsMid);
     plane->x_normal_ << evecs.real()(0, evalsMax), evecs.real()(1, evalsMax), evecs.real()(2, evalsMax);
     plane->min_eigen_value_ = evalsReal(evalsMin);
     plane->mid_eigen_value_ = evalsReal(evalsMid);
     plane->max_eigen_value_ = evalsReal(evalsMax);
+    // 最大特征值的平方根作为平面的半径，即标准差σ
     plane->radius_ = sqrt(evalsReal(evalsMax));
+    // 平面一般方程的系数 D
     plane->d_ = -(plane->normal_(0) * plane->center_(0) + plane->normal_(1) * plane->center_(1) + plane->normal_(2) * plane->center_(2));
     plane->is_plane_ = true;
     plane->is_update_ = true;
+    // 如果平面没有初始化过，则设置平面ID
     if (!plane->is_init_)
     {
       plane->id_ = voxel_plane_id;
@@ -138,11 +154,13 @@ void VoxelOctoTree::init_octo_tree()
 {
   if (temp_points_.size() > points_size_threshold_)
   {
+    // 如果能成功拟合平面，就不再分割创建子节点
     init_plane(temp_points_, plane_ptr_);
     if (plane_ptr_->is_plane_ == true)
     {
       octo_state_ = 0;
       // new added
+      // 当体素中点数大于最大点数时，体素不再更新，且删除之前保存的所有点
       if (temp_points_.size() > max_points_num_)
       {
         update_enable_ = false;
@@ -162,22 +180,27 @@ void VoxelOctoTree::init_octo_tree()
 
 void VoxelOctoTree::cut_octo_tree()
 {
+  // 结束条件1: 大于最大层数
   if (layer_ >= max_layer_)
   {
     octo_state_ = 0;
     return;
   }
+  // 把所有点都放入对应的子节点中
   for (size_t i = 0; i < temp_points_.size(); i++)
   {
     int xyz[3] = {0, 0, 0};
     if (temp_points_[i].point_w[0] > voxel_center_[0]) { xyz[0] = 1; }
     if (temp_points_[i].point_w[1] > voxel_center_[1]) { xyz[1] = 1; }
     if (temp_points_[i].point_w[2] > voxel_center_[2]) { xyz[2] = 1; }
+    // 计算子节点编号
     int leafnum = 4 * xyz[0] + 2 * xyz[1] + xyz[2];
+
     if (leaves_[leafnum] == nullptr)
     {
       leaves_[leafnum] = new VoxelOctoTree(max_layer_, layer_ + 1, layer_init_num_[layer_ + 1], max_points_num_, planer_threshold_);
       leaves_[leafnum]->layer_init_num_ = layer_init_num_;
+      // 在原有体素中心基础上，加减1/4的体素长度，得到新的体素中心
       leaves_[leafnum]->voxel_center_[0] = voxel_center_[0] + (2 * xyz[0] - 1) * quater_length_;
       leaves_[leafnum]->voxel_center_[1] = voxel_center_[1] + (2 * xyz[1] - 1) * quater_length_;
       leaves_[leafnum]->voxel_center_[2] = voxel_center_[2] + (2 * xyz[2] - 1) * quater_length_;
@@ -192,6 +215,7 @@ void VoxelOctoTree::cut_octo_tree()
     {
       if (leaves_[i]->temp_points_.size() > leaves_[i]->points_size_threshold_)
       {
+        // 开始条件2: 成功拟合平面
         init_plane(leaves_[i]->temp_points_, leaves_[i]->plane_ptr_);
         if (leaves_[i]->plane_ptr_->is_plane_)
         {
@@ -212,6 +236,7 @@ void VoxelOctoTree::cut_octo_tree()
         leaves_[i]->init_octo_ = true;
         leaves_[i]->new_points_ = 0;
       }
+      // 结束条件3: 子节点的点云数小于拟合平面所需的点数
     }
   }
 }
@@ -351,8 +376,10 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
     V3D point_this(feats_down_body_->points[i].x, feats_down_body_->points[i].y, feats_down_body_->points[i].z);
     if (point_this[2] == 0) { point_this[2] = 0.001; }
     M3D var;
+    // 计算点云在Lidar系下的协方差矩阵
     calcBodyCov(point_this, config_setting_.dept_err_, config_setting_.beam_err_, var);
     body_cov_list_.push_back(var);
+    // 计算IMU下的点云坐标
     point_this = extR_ * point_this + extT_;
     M3D point_crossmat;
     point_crossmat << SKEW_SYM_MATRX(point_this);
@@ -372,6 +399,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
   for (int iterCount = 0; iterCount < config_setting_.max_iterations_; iterCount++)
   {
     double total_residual = 0.0;
+    // 转换至World系下
     pcl::PointCloud<pcl::PointXYZI>::Ptr world_lidar(new pcl::PointCloud<pcl::PointXYZI>);
     TransformLidar(state_.rot_end, state_.pos_end, feats_down_body_, world_lidar);
     M3D rot_var = state_.cov.block<3, 3>(0, 0);
@@ -384,6 +412,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
 
       M3D cov = body_cov_list_[i];
       M3D point_crossmat = cross_mat_list_[i];
+      //! 这里的point_crossmat是IMU系下的，BuildVoxelMap中的point_crossmat是Lidar系下
       cov = state_.rot_end * cov * state_.rot_end.transpose() + (-point_crossmat) * rot_var * (-point_crossmat.transpose()) + t_var;
       pv.var = cov;
       pv.body_var = body_cov_list_[i];
@@ -392,6 +421,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
 
     // double t1 = omp_get_wtime();
 
+    // 构建点面残差约束
     BuildResidualListOMP(pv_list_, ptpl_list_);
 
     // build_residual_time += omp_get_wtime() - t1;
@@ -422,6 +452,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
 
       /*** get the normal vector of closest surface/corner ***/
 
+      // 计算观测噪声的方差
       V3D point_world = state_propagat.rot_end * point_this + state_propagat.pos_end;
       Eigen::Matrix<double, 1, 6> J_nq;
       J_nq.block<1, 3>(0, 0) = point_world - ptpl_list_[i].center_;
@@ -446,14 +477,17 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
 
       double sigma_l = J_nq * ptpl_list_[i].plane_var_ * J_nq.transpose();
 
+      // 可能算出来的方差有点小了，这里加一个量增大一点
       R_inv(i) = 1.0 / (0.001 + sigma_l + ptpl_list_[i].normal_.transpose() * var * ptpl_list_[i].normal_);
       // R_inv(i) = 1.0 / (sigma_l + ptpl_list_[i].normal_.transpose() * var * ptpl_list_[i].normal_);
 
       /*** calculate the Measuremnt Jacobian matrix H ***/
+      //! H(R) = -n^T * Rp^ ， H(p) = n^T ，这里用的转置形式
       V3D A(point_crossmat * state_.rot_end.transpose() * ptpl_list_[i].normal_);
       Hsub.row(i) << VEC_FROM_ARRAY(A), ptpl_list_[i].normal_[0], ptpl_list_[i].normal_[1], ptpl_list_[i].normal_[2];
       Hsub_T_R_inv.col(i) << A[0] * R_inv(i), A[1] * R_inv(i), A[2] * R_inv(i), ptpl_list_[i].normal_[0] * R_inv(i),
           ptpl_list_[i].normal_[1] * R_inv(i), ptpl_list_[i].normal_[2] * R_inv(i);
+      // 这里用的负值
       meas_vec(i) = -ptpl_list_[i].dis_to_plane_;
     }
     EKF_stop_flg = false;
@@ -461,14 +495,19 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
     /*** Iterative Kalman Filter Update ***/
     MatrixXd K(DIM_STATE, effct_feat_num_);
     // auto &&Hsub_T = Hsub.transpose();
+    //! HTz = H_T * R_inv * -z;
     auto &&HTz = Hsub_T_R_inv * meas_vec;
     // fout_dbg<<"HTz: "<<HTz<<endl;
     H_T_H.block<6, 6>(0, 0) = Hsub_T_R_inv * Hsub;
     // EigenSolver<Matrix<double, 6, 6>> es(H_T_H.block<6,6>(0,0));
+    //! K1 = (H_T * R_inv * H + P_inv)^-1
     MD(DIM_STATE, DIM_STATE) &&K_1 = (H_T_H.block<DIM_STATE, DIM_STATE>(0, 0) + state_.cov.block<DIM_STATE, DIM_STATE>(0, 0).inverse()).inverse();
+    //! G = KH
     G.block<DIM_STATE, 6>(0, 0) = K_1.block<DIM_STATE, 6>(0, 0) * H_T_H.block<6, 6>(0, 0);
     auto vec = state_propagat - state_;
     VD(DIM_STATE)
+    //! K1 * HTz = -Kz
+    //! solution = -kz + (x_prop - x_cur) - KH * (x_prop - x_cur) = -kz - (I - KH) * (x_cur - x_prop)
     solution = K_1.block<DIM_STATE, 6>(0, 0) * HTz + vec.block<DIM_STATE, 1>(0, 0) - G.block<DIM_STATE, 6>(0, 0) * vec.block<6, 1>(0, 0);
     int minRow, minCol;
     state_ += solution;
@@ -484,8 +523,10 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
     /*** Convergence Judgements and Covariance Update ***/
     if (!EKF_stop_flg && (rematch_num >= 2 || (iterCount == config_setting_.max_iterations_ - 1)))
     {
+      // 更新协方差
       /*** Covariance Update ***/
       // _state.cov = (I_STATE - G) * _state.cov;
+      //! P = (I - KH)P
       state_.cov.block<DIM_STATE, DIM_STATE>(0, 0) =
           (I_STATE.block<DIM_STATE, DIM_STATE>(0, 0) - G.block<DIM_STATE, DIM_STATE>(0, 0)) * state_.cov.block<DIM_STATE, DIM_STATE>(0, 0);
       // total_distance += (_state.pos_end - position_last).norm();
@@ -539,6 +580,7 @@ void VoxelMapManager::BuildVoxelMap()
 
   std::vector<pointWithVar> input_points;
 
+  // 计算每个点在world系下的协方差
   for (size_t i = 0; i < feats_down_world_->size(); i++)
   {
     pointWithVar pv;
@@ -548,12 +590,14 @@ void VoxelMapManager::BuildVoxelMap()
     calcBodyCov(point_this, config_setting_.dept_err_, config_setting_.beam_err_, var);
     M3D point_crossmat;
     point_crossmat << SKEW_SYM_MATRX(point_this);
+    //! https://github.com/hku-mars/FAST-LIVO2/issues/89
     var = (state_.rot_end * extR_) * var * (state_.rot_end * extR_).transpose() +
           (-point_crossmat) * state_.cov.block<3, 3>(0, 0) * (-point_crossmat).transpose() + state_.cov.block<3, 3>(3, 3);
     pv.var = var;
     input_points.push_back(pv);
   }
 
+  // 根据点的坐标放入对应的voxel中
   uint plsize = input_points.size();
   for (uint i = 0; i < plsize; i++)
   {
@@ -584,6 +628,7 @@ void VoxelMapManager::BuildVoxelMap()
       voxel_map_[position]->layer_init_num_ = layer_init_num;
     }
   }
+  // 逐个voxel进行初始化
   for (auto iter = voxel_map_.begin(); iter != voxel_map_.end(); ++iter)
   {
     iter->second->init_octo_tree();
@@ -679,6 +724,7 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
       build_single_residual(pv, current_octo, 0, is_sucess, prob, single_ptpl);
       if (!is_sucess)
       {
+        // 当前voxel中没有找到匹配的点面，则尝试在另一个相邻的voxel中搜索
         VOXEL_LOCATION near_position = position;
         if (loc_xyz[0] > (current_octo->voxel_center_[0] + current_octo->quater_length_)) { near_position.x = near_position.x + 1; }
         else if (loc_xyz[0] < (current_octo->voxel_center_[0] - current_octo->quater_length_)) { near_position.x = near_position.x - 1; }
@@ -689,6 +735,7 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
         auto iter_near = voxel_map_.find(near_position);
         if (iter_near != voxel_map_.end()) { build_single_residual(pv, iter_near->second, 0, is_sucess, prob, single_ptpl); }
       }
+      // 如果找到匹配的点面，则将其添加到结果列表中
       if (is_sucess)
       {
         mylock.lock();
@@ -704,6 +751,7 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
       }
     }
   }
+  // 将有效结果添加到最终结果列表中
   for (size_t i = 0; i < useful_ptpl.size(); i++)
   {
     if (useful_ptpl[i]) { ptpl_list.push_back(all_ptpl_list[i]); }
@@ -714,29 +762,38 @@ void VoxelMapManager::build_single_residual(pointWithVar &pv, const VoxelOctoTre
                                             double &prob, PointToPlane &single_ptpl)
 {
   int max_layer = config_setting_.max_layer_;
-  double sigma_num = config_setting_.sigma_num_;
+  double sigma_num = config_setting_.sigma_num_; // 3
 
   double radius_k = 3;
   Eigen::Vector3d p_w = pv.point_w;
+  // 如果当前节点是plane，则直接计算
   if (current_octo->plane_ptr_->is_plane_)
   {
     VoxelPlane &plane = *current_octo->plane_ptr_;
     Eigen::Vector3d p_world_to_center = p_w - plane.center_;
+    // 点到平面的距离
     float dis_to_plane = fabs(plane.normal_(0) * p_w(0) + plane.normal_(1) * p_w(1) + plane.normal_(2) * p_w(2) + plane.d_);
+    // 点对平面中心的距离
     float dis_to_center = (plane.center_(0) - p_w(0)) * (plane.center_(0) - p_w(0)) + (plane.center_(1) - p_w(1)) * (plane.center_(1) - p_w(1)) +
                           (plane.center_(2) - p_w(2)) * (plane.center_(2) - p_w(2));
+    // 点投影到平面上后与中心点的距离
     float range_dis = sqrt(dis_to_center - dis_to_plane * dis_to_plane);
 
+    // 判断投影点是否在3σ范围内
     if (range_dis <= radius_k * plane.radius_)
     {
+      // 协方差传播至点面距离
       Eigen::Matrix<double, 1, 6> J_nq;
+      //! 这里直接对1行3列赋值，所以不用带转置
       J_nq.block<1, 3>(0, 0) = p_w - plane.center_;
       J_nq.block<1, 3>(0, 3) = -plane.normal_;
       double sigma_l = J_nq * plane.plane_var_ * J_nq.transpose();
       sigma_l += plane.normal_.transpose() * pv.var * plane.normal_;
+      // 判断点面距离是否在3σ范围内
       if (dis_to_plane < sigma_num * sqrt(sigma_l))
       {
         is_sucess = true;
+        // 计算概率，高斯概率公式
         double this_prob = 1.0 / (sqrt(sigma_l)) * exp(-0.5 * dis_to_plane * dis_to_plane / sigma_l);
         if (this_prob > prob)
         {
@@ -756,18 +813,21 @@ void VoxelMapManager::build_single_residual(pointWithVar &pv, const VoxelOctoTre
       }
       else
       {
+        // 异常匹配，返回
         // is_sucess = false;
         return;
       }
     }
     else
     {
+      // 异常匹配，返回
       // is_sucess = false;
       return;
     }
   }
   else
   {
+    // 当前节点没有平面，则继续查找子节点
     if (current_layer < max_layer)
     {
       for (size_t leafnum = 0; leafnum < 8; leafnum++)
