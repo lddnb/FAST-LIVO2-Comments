@@ -243,6 +243,7 @@ void VoxelOctoTree::cut_octo_tree()
 
 void VoxelOctoTree::UpdateOctoTree(const pointWithVar &pv)
 {
+  // 如果还没有初始化八叉树，则直接把点加入到临时点云列表中，等待足够数量的点云后进行八叉树初始化
   if (!init_octo_)
   {
     new_points_++;
@@ -251,17 +252,21 @@ void VoxelOctoTree::UpdateOctoTree(const pointWithVar &pv)
   }
   else
   {
+    // 当前节点已经是一个平面
     if (plane_ptr_->is_plane_)
     {
+      // 其中的点云数还没达到最大值
       if (update_enable_)
       {
         new_points_++;
         temp_points_.push_back(pv);
+        // 新加的点达到一定数量再重新拟合平面
         if (new_points_ > update_size_threshold_)
         {
           init_plane(temp_points_, plane_ptr_);
           new_points_ = 0;
         }
+        // 点云数达到最大数量，该节点不再更新
         if (temp_points_.size() >= max_points_num_)
         {
           update_enable_ = false;
@@ -272,8 +277,10 @@ void VoxelOctoTree::UpdateOctoTree(const pointWithVar &pv)
     }
     else
     {
+      // 当前节点没有平面
       if (layer_ < max_layer_)
       {
+        // 如果没到最大层数，则把点加入到对应的子节点中，递归处理
         int xyz[3] = {0, 0, 0};
         if (pv.point_w[0] > voxel_center_[0]) { xyz[0] = 1; }
         if (pv.point_w[1] > voxel_center_[1]) { xyz[1] = 1; }
@@ -293,15 +300,18 @@ void VoxelOctoTree::UpdateOctoTree(const pointWithVar &pv)
       }
       else
       {
+        // 已经到最大层数，则把点加入到临时点云列表中
         if (update_enable_)
         {
           new_points_++;
           temp_points_.push_back(pv);
+          // 新加的点达到一定数量再重新拟合平面
           if (new_points_ > update_size_threshold_)
           {
             init_plane(temp_points_, plane_ptr_);
             new_points_ = 0;
           }
+          // 点云数达到最大数量，该节点不再更新
           if (temp_points_.size() > max_points_num_)
           {
             update_enable_ = false;
@@ -360,6 +370,7 @@ VoxelOctoTree *VoxelOctoTree::Insert(const pointWithVar &pv)
   return nullptr;
 }
 
+//Todo：第一次的初始化时各个状态量如何变化
 void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
 {
   cross_mat_list_.clear();
@@ -998,6 +1009,7 @@ void VoxelMapManager::mapSliding()
     loc_xyz[j] = position_last_[j] / config_setting_.max_voxel_size_;
     if (loc_xyz[j] < 0) { loc_xyz[j] -= 1.0; }
   }
+  // 删除远离当前位置的voxel
   // VOXEL_LOCATION position((int64_t)loc_xyz[0], (int64_t)loc_xyz[1], (int64_t)loc_xyz[2]);//discrete global
   clearMemOutOfMap((int64_t)loc_xyz[0] + config_setting_.half_map_size, (int64_t)loc_xyz[0] - config_setting_.half_map_size,
                     (int64_t)loc_xyz[1] + config_setting_.half_map_size, (int64_t)loc_xyz[1] - config_setting_.half_map_size,

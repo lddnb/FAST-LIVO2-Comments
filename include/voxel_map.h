@@ -198,6 +198,11 @@ public:
    * 
    */
   void cut_octo_tree();
+  /**
+   * @brief 递归往voxel的八叉树中插入点云
+   * 
+   * @param pv 
+   */
   void UpdateOctoTree(const pointWithVar &pv);
 
   VoxelOctoTree *find_correspond(Eigen::Vector3d pw);
@@ -270,6 +275,11 @@ public:
   void BuildVoxelMap();
   V3F RGBFromVoxel(const V3D &input_point);
 
+  /**
+   * @brief 往voxel地图中插入新的点云，更新地图
+   * 
+   * @param input_points 
+   */
   void UpdateVoxelMap(const std::vector<pointWithVar> &input_points);
 
   /**
@@ -295,7 +305,21 @@ public:
 
   void pubVoxelMap();
 
+  /**
+   * @brief 根据行进的距离做地图滑窗，精简voxel地图，减少内存占用
+   * 
+   */
   void mapSliding();
+  /**
+   * @brief 清除地图中超出包围盒范围的voxel地图
+   * 
+   * @param x_max 
+   * @param x_min 
+   * @param y_max 
+   * @param y_min 
+   * @param z_max 
+   * @param z_min 
+   */
   void clearMemOutOfMap(const int& x_max,const int& x_min,const int& y_max,const int& y_min,const int& z_max,const int& z_min );
 
 private:

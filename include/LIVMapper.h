@@ -182,7 +182,7 @@ public:
   double last_timestamp_lidar = -1.0, last_timestamp_imu = -1.0, last_timestamp_img = -1.0;
   double filter_size_surf_min = 0;
   double filter_size_pcd = 0;
-  double _first_lidar_time = 0.0;
+  double _first_lidar_time = 0.0;                 // 第一帧Lidar的时间戳，作为基准时间，用于计算时间偏移
   double match_time = 0, solve_time = 0, solve_const_H_time = 0;
 
   bool lidar_map_inited = false, pcd_save_en = false, pub_effect_point_en = false, pose_output_en = false, ros_driver_fix_en = false, hilti_en = false;
@@ -241,7 +241,7 @@ public:
   PointCloudXYZI::Ptr feats_undistort;            // 点云去畸变后、降采样前，在Lidar系下的点云
   PointCloudXYZI::Ptr feats_down_body;            // 点云降采样后，在Lidar系下的点云
   PointCloudXYZI::Ptr feats_down_world;           // 点云降采样后，在World系下的点云
-  PointCloudXYZI::Ptr pcl_w_wait_pub;             // 一帧处理完之后的World系下的点云
+  PointCloudXYZI::Ptr pcl_w_wait_pub;             // 一帧处理完之后的World系下用于发布的点云
   PointCloudXYZI::Ptr pcl_wait_pub;               // 发布函数中的一个临时变量
   PointCloudXYZRGB::Ptr pcl_wait_save;            // 用于保存的点云
   PointCloudXYZI::Ptr pcl_wait_save_intensity;    // 没图像时用于保存的强度点云

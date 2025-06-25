@@ -280,11 +280,13 @@ void LIVMapper::stateEstimationAndMapping()
 
 void LIVMapper::handleVIO() 
 {
+  // 记录VIO更新前的状态
   euler_cur = RotMtoEuler(_state.rot_end);
   fout_pre << std::setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " " << euler_cur.transpose() * 57.3 << " "
             << _state.pos_end.transpose() << " " << _state.vel_end.transpose() << " " << _state.bias_g.transpose() << " "
             << _state.bias_a.transpose() << " " << V3D(_state.inv_expo_time, 0, 0).transpose() << std::endl;
     
+  // 确认先经过了LIO的处理
   if (pcl_w_wait_pub->empty() || (pcl_w_wait_pub == nullptr)) 
   {
     std::cout << "[ VIO ] No point!!!" << std::endl;
@@ -293,6 +295,7 @@ void LIVMapper::handleVIO()
     
   std::cout << "[ VIO ] Raw feature num: " << pcl_w_wait_pub->points.size() << std::endl;
 
+  // 用于调试画图，默认参数不会开启
   if (fabs((LidarMeasures.last_lio_update_time - _first_lidar_time) - plot_time) < (frame_cnt / 2 * 0.1)) 
   {
     vio_manager->plot_flag = true;
@@ -302,6 +305,7 @@ void LIVMapper::handleVIO()
     vio_manager->plot_flag = false;
   }
 
+  // VIO处理
   vio_manager->processFrame(LidarMeasures.measures.back().img, _pv_list, voxelmap_manager->voxel_map_, LidarMeasures.last_lio_update_time - _first_lidar_time);
 
   if (imu_prop_enable) 
@@ -365,16 +369,19 @@ void LIVMapper::handleLIO()
   {
     lidar_map_inited = true;
     voxelmap_manager->BuildVoxelMap();
+    // 后面还要算pcl_w_wait_pub，这里就先不return了
   }
 
   double t1 = omp_get_wtime();
 
+  // 更新状态
   voxelmap_manager->StateEstimation(state_propagat);
   _state = voxelmap_manager->state_;
   _pv_list = voxelmap_manager->pv_list_;
 
   double t2 = omp_get_wtime();
 
+  // UAV相关
   if (imu_prop_enable) 
   {
     ekf_finish_once = true;
@@ -383,6 +390,7 @@ void LIVMapper::handleLIO()
     state_update_flg = true;
   }
 
+  // 保存位姿，TUM格式，用于EVO对比
   if (pose_output_en) 
   {
     static bool pos_opend = false;
@@ -414,42 +422,52 @@ void LIVMapper::handleLIO()
 
   PointCloudXYZI::Ptr world_lidar(new PointCloudXYZI());
   transformLidar(_state.rot_end, _state.pos_end, feats_down_body, world_lidar);
+  // 更新world系点云的坐标和协方差
   for (size_t i = 0; i < world_lidar->points.size(); i++) 
   {
     voxelmap_manager->pv_list_[i].point_w << world_lidar->points[i].x, world_lidar->points[i].y, world_lidar->points[i].z;
+    //! point_crossmat是IMU系下的
     M3D point_crossmat = voxelmap_manager->cross_mat_list_[i];
+    //! body_cov_list_是Lidar系下的
     M3D var = voxelmap_manager->body_cov_list_[i];
+    //! 所以这里前面带外参，后面不带外参
     var = (_state.rot_end * extR) * var * (_state.rot_end * extR).transpose() +
           (-point_crossmat) * _state.cov.block<3, 3>(0, 0) * (-point_crossmat).transpose() + _state.cov.block<3, 3>(3, 3);
     voxelmap_manager->pv_list_[i].var = var;
   }
+  // 用新点云更新地图
   voxelmap_manager->UpdateVoxelMap(voxelmap_manager->pv_list_);
   std::cout << "[ LIO ] Update Voxel Map" << std::endl;
   _pv_list = voxelmap_manager->pv_list_;
   
   double t4 = omp_get_wtime();
 
+  // 是否使用地图滑窗
   if(voxelmap_manager->config_setting_.map_sliding_en)
   {
     voxelmap_manager->mapSliding();
   }
   
+  // 是否用全部点云用于发布
   PointCloudXYZI::Ptr laserCloudFullRes(dense_map_en ? feats_undistort : feats_down_body);
   int size = laserCloudFullRes->points.size();
   PointCloudXYZI::Ptr laserCloudWorld(new PointCloudXYZI(size, 1));
 
+  // 获取world系下的发布点云
   for (int i = 0; i < size; i++) 
   {
     RGBpointBodyToWorld(&laserCloudFullRes->points[i], &laserCloudWorld->points[i]);
   }
   *pcl_w_wait_pub = *laserCloudWorld;
 
+  // 没图像的话就直接发布强度点云
   if (!img_en) publish_frame_world(pubLaserCloudFullRes, vio_manager);
   if (pub_effect_point_en) publish_effect_world(pubLaserCloudEffect, voxelmap_manager->ptpl_list_);
   if (voxelmap_manager->config_setting_.is_pub_plane_map_) voxelmap_manager->pubVoxelMap();
   publish_path(pubPath);
   publish_mavros(mavros_pose_publisher);
 
+  // id+1
   frame_num++;
   aver_time_consu = aver_time_consu * (frame_num - 1) / frame_num + (t4 - t0) / frame_num;
 
@@ -477,6 +495,7 @@ void LIVMapper::handleLIO()
   printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Average Total Time", aver_time_consu);
   printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
 
+  // 保存日志
   euler_cur = RotMtoEuler(_state.rot_end);
   fout_out << std::setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " " << euler_cur.transpose() * 57.3 << " "
             << _state.pos_end.transpose() << " " << _state.vel_end.transpose() << " " << _state.bias_g.transpose() << " "
