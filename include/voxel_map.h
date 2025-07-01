@@ -205,6 +205,12 @@ public:
    */
   void UpdateOctoTree(const pointWithVar &pv);
 
+  /**
+   * @brief 在voxelmap中找到一个三维点所在的节点
+   * 
+   * @param pw 
+   * @return VoxelOctoTree* 
+   */
   VoxelOctoTree *find_correspond(Eigen::Vector3d pw);
   VoxelOctoTree *Insert(const pointWithVar &pv);
 };
@@ -245,10 +251,10 @@ public:
 
   int feats_down_size_;
   int effct_feat_num_;
-  std::vector<M3D> cross_mat_list_;
-  std::vector<M3D> body_cov_list_;
-  std::vector<pointWithVar> pv_list_;
-  std::vector<PointToPlane> ptpl_list_;
+  std::vector<M3D> cross_mat_list_;               // 点云叉乘的反对称矩阵列表
+  std::vector<M3D> body_cov_list_;                // 在Lidar系下点云协方差列表
+  std::vector<pointWithVar> pv_list_;             // 点云降采样后，在World系下带协方差的点云
+  std::vector<PointToPlane> ptpl_list_;           // 点面残差约束列表
 
   VoxelMapManager(VoxelMapConfig &config_setting, std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &voxel_map)
       : config_setting_(config_setting), voxel_map_(voxel_map)

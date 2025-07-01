@@ -231,10 +231,10 @@ public:
   deque<cv::Mat> img_buffer;
   deque<double> img_time_buffer;
   vector<pointWithVar> _pv_list;
-  vector<double> extrinT;                         // lidar到IMU的平移外参 t_imu2lidar
-  vector<double> extrinR;                         // lidar到IMU的旋转外参 R_imu2lidar
-  vector<double> cameraextrinT;                   // lidar到相机的平移外参 t_camera2lidar
-  vector<double> cameraextrinR;                   // lidar到相机的旋转外参 R_camera2lidar
+  vector<double> extrinT;                         // lidar到IMU的平移外参 t_imu_lidar
+  vector<double> extrinR;                         // lidar到IMU的旋转外参 R_imu_lidar
+  vector<double> cameraextrinT;                   // lidar到相机的平移外参 t_camera_lidar
+  vector<double> cameraextrinR;                   // lidar到相机的旋转外参 R_camera_lidar
   double IMG_POINT_COV;                           // 图像特征点协方差，即权重
 
   PointCloudXYZI::Ptr visual_sub_map;             // 视觉地图点云

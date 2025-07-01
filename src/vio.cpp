@@ -59,10 +59,10 @@ void VIOManager::initializeVIO()
 
   V3D Pic;
   M3D tmp;
-  Jdphi_dR = Rci;
+  Jdphi_dR = Rci; // ∂φ/∂R = -R_ci
   Pic = -Rci.transpose() * Pci;
   tmp << SKEW_SYM_MATRX(Pic);
-  Jdp_dR = -Rci * tmp;
+  Jdp_dR = -Rci * tmp; // ∂ρ/∂R = R_ci * t_ic^
 
   if (grid_size > 10)
   {
@@ -88,9 +88,10 @@ void VIOManager::initializeVIO()
     rays_with_sample_points.reserve(length);
     printf("grid_size: %d, grid_n_height: %d, grid_n_width: %d, length: %d\n", grid_size, grid_n_height, grid_n_width, length);
 
-    float d_min = 0.1;
-    float d_max = 3.0;
-    float step = 0.2;
+    float d_min = 0.1; // 最小距离
+    float d_max = 3.0; // 最大距离
+    float step = 0.2;  // 步长
+    // 遍历所有网格
     for (int grid_row = 1; grid_row <= grid_n_height; grid_row++)
     {
       for (int grid_col = 1; grid_col <= grid_n_width; grid_col++)
@@ -98,15 +99,19 @@ void VIOManager::initializeVIO()
         std::vector<V3D> SamplePointsEachGrid;
         int index = (grid_row - 1) * grid_n_width + grid_col - 1;
 
+        // 标记所有边缘网格
         if (grid_row == 1 || grid_col == 1 || grid_row == grid_n_height || grid_col == grid_n_width) border_flag[index] = 1;
 
+        // 计算网格中心点坐标
         int u = grid_size / 2 + (grid_col - 1) * grid_size;
         int v = grid_size / 2 + (grid_row - 1) * grid_size;
         // it[ u + v * width ] = 255;
         for (float d_temp = d_min; d_temp <= d_max; d_temp += step)
         {
           V3D xyz;
+          // 转到世界系下，得到的是单位向量
           xyz = cam->cam2world(u, v);
+          // 归一化坐标乘以距离
           xyz *= d_temp / xyz[2];
           // xyz[0] = (u - cx) / fx * d_temp;
           // xyz[1] = (v - cy) / fy * d_temp;
@@ -253,18 +258,24 @@ void VIOManager::getWarpMatrixAffineHomography(const vk::AbstractCamera &cam, co
                                                   const SE3 &T_cur_ref, const int level_ref, Matrix2d &A_cur_ref)
 {
   // create homography matrix
+  //! 这里的t是逆变换的平移，即 t_ref2cur = - R_cur2ref^T * t_cur2ref
   const V3D t = T_cur_ref.inverse().translation();
+  //! H_cur_ref其实是 -d*H
   const Eigen::Matrix3d H_cur_ref =
       T_cur_ref.rotation_matrix() * (normal_ref.dot(xyz_ref) * Eigen::Matrix3d::Identity() - t * normal_ref.transpose());
   // Compute affine warp matrix A_ref_cur using homography projection
   const int kHalfPatchSize = 4;
+  // 计算添加增量之后参考系下的三维点
   V3D f_du_ref(cam.cam2world(px_ref + Eigen::Vector2d(kHalfPatchSize, 0) * (1 << level_ref)));
   V3D f_dv_ref(cam.cam2world(px_ref + Eigen::Vector2d(0, kHalfPatchSize) * (1 << level_ref)));
+  // 没必要做归一化，都是在齐次坐标系下运算，最后得到当前帧像素坐标包含了一个齐次除法
   //   f_du_ref = f_du_ref/f_du_ref[2];
   //   f_dv_ref = f_dv_ref/f_dv_ref[2];
+  // 计算当前帧下的三维点
   const V3D f_cur(H_cur_ref * xyz_ref);
   const V3D f_du_cur = H_cur_ref * f_du_ref;
   const V3D f_dv_cur = H_cur_ref * f_dv_ref;
+  // 计算当前帧下的像素坐标
   V2D px_cur(cam.world2cam(f_cur));
   V2D px_du_cur(cam.world2cam(f_du_cur));
   V2D px_dv_cur(cam.world2cam(f_dv_cur));
@@ -278,8 +289,10 @@ void VIOManager::getWarpMatrixAffine(const vk::AbstractCamera &cam, const Vector
 {
   // Compute affine warp matrix A_ref_cur
   const Vector3d xyz_ref(f_ref * depth_ref);
+  // 计算添加增量之后参考系下的三维点
   Vector3d xyz_du_ref(cam.cam2world(px_ref + Vector2d(halfpatch_size, 0) * (1 << level_ref) * (1 << pyramid_level)));
   Vector3d xyz_dv_ref(cam.cam2world(px_ref + Vector2d(0, halfpatch_size) * (1 << level_ref) * (1 << pyramid_level)));
+  // 保证在图像上的深度一致
   xyz_du_ref *= xyz_ref[2] / xyz_du_ref[2];
   xyz_dv_ref *= xyz_ref[2] / xyz_dv_ref[2];
   const Vector2d px_cur(cam.world2cam(T_cur_ref * (xyz_ref)));
@@ -293,6 +306,7 @@ void VIOManager::warpAffine(const Matrix2d &A_cur_ref, const cv::Mat &img_ref, c
                                const int pyramid_level, const int halfpatch_size, float *patch)
 {
   const int patch_size = halfpatch_size * 2;
+  // 逆向映射 Inverse Mapping 的操作，可以对ref图像上的像素做插值
   const Matrix2f A_ref_cur = A_cur_ref.inverse().cast<float>();
   if (isnan(A_ref_cur(0, 0)))
   {
@@ -308,6 +322,7 @@ void VIOManager::warpAffine(const Matrix2d &A_cur_ref, const cv::Mat &img_ref, c
       Vector2f px_patch(x - halfpatch_size, y - halfpatch_size);
       px_patch *= (1 << search_level);
       px_patch *= (1 << pyramid_level);
+      // 逆向映射得到参考系下的浮点像素坐标
       const Vector2f px(A_ref_cur * px_patch + px_ref.cast<float>());
       if (px[0] < 0 || px[1] < 0 || px[0] >= img_ref.cols - 1 || px[1] >= img_ref.rows - 1)
         patch_ptr[patch_size_total * pyramid_level + y * patch_size + x] = 0;
@@ -321,7 +336,8 @@ int VIOManager::getBestSearchLevel(const Matrix2d &A_cur_ref, const int max_leve
 {
   // Compute patch level in other image
   int search_level = 0;
-  double D = A_cur_ref.determinant();
+  double D = A_cur_ref.determinant(); //! 行列式几何意义：面积的缩放比例
+  // 当缩放比例大于3时，往上层搜索
   while (D > 3.0 && search_level < max_level)
   {
     search_level += 1;
@@ -359,6 +375,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
   // downSizeFilter.filter(*pg_down);
 
   // resetRvizDisplay();
+  // 重置当前图像的子图相关状态
   visual_submap->reset();
 
   // Controls whether to include the visual submap from the previous frame.
@@ -368,6 +385,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
 
   if (!normal_en) warp_map.clear();
 
+  // 深度图
   cv::Mat depth_img = cv::Mat::zeros(height, width, CV_32FC1);
   float *it = (float *)depth_img.data;
 
@@ -399,6 +417,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
     // t_position += omp_get_wtime()-t0;
     // double t1 = omp_get_wtime();
 
+    // 将各个点云所在的体素标记出来
     auto iter = sub_feat_map.find(position);
     if (iter == sub_feat_map.end()) { sub_feat_map[position] = 0; }
     else { iter->second = 0; }
@@ -406,15 +425,19 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
     // t_insert += omp_get_wtime()-t1;
     // double t2 = omp_get_wtime();
 
+    // 计算当前帧相机系下的三维坐标
     V3D pt_c(new_frame_->w2f(pt_w));
 
+    // 如果点云在相机前方
     if (pt_c[2] > 0)
     {
+      // 将点云投影到当前帧得到像素坐标
       V2D px;
       // px[0] = fx * pt_c[0]/pt_c[2] + cx;
       // px[1] = fy * pt_c[1]/pt_c[2]+ cy;
       px = new_frame_->cam_->world2cam(pt_c);
 
+      // 如果像素不是在图像外或者图像边缘，就把这个点的z轴作为图像深度
       if (new_frame_->cam_->isInFrame(px.cast<int>(), border))
       {
         // cv::circle(img_cp, cv::Point2f(px[0], px[1]), 3, cv::Scalar(0, 0, 255), -1, 8);
@@ -435,12 +458,14 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
   // printf("A. projection: %.6lf \n", omp_get_wtime() - ts0);
 
   // double t1 = omp_get_wtime();
+  // 当前帧体素地图的删除列表
   vector<VOXEL_LOCATION> DeleteKeyList;
 
   for (auto &iter : sub_feat_map)
   {
     VOXEL_LOCATION position = iter.first;
 
+    // 从视觉地图中找到对应体素
     // double t4 = omp_get_wtime();
     auto corre_voxel = feat_map.find(position);
     // double t5 = omp_get_wtime();
@@ -448,6 +473,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
     if (corre_voxel != feat_map.end())
     {
       bool voxel_in_fov = false;
+      // 取出视觉点图中对应体素中的点
       std::vector<VisualPoint *> &voxel_points = corre_voxel->second->voxel_points;
       int voxel_num = voxel_points.size();
 
@@ -458,20 +484,28 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
         if (pt->obs_.size() == 0) continue;
 
         V3D norm_vec(new_frame_->T_f_w_.rotation_matrix() * pt->normal_);
+        // 把地图点转到当前帧相机系下
         V3D dir(new_frame_->T_f_w_ * pt->pos_);
+        // 如果地图点不在相机前方
         if (dir[2] < 0) continue;
         // dir.normalize();
         // if (dir.dot(norm_vec) <= 0.17) continue; // 0.34 70 degree  0.17 80 degree 0.08 85 degree
 
+        // 地图点的像素坐标
         V2D pc(new_frame_->w2c(pt->pos_));
+        // 像素在图像非边缘区域范围内
         if (new_frame_->cam_->isInFrame(pc.cast<int>(), border))
         {
           // cv::circle(img_cp, cv::Point2f(pc[0], pc[1]), 3, cv::Scalar(0, 255, 255), -1, 8);
           voxel_in_fov = true;
+          // 计算grid的索引
           int index = static_cast<int>(pc[1] / grid_size) * grid_n_width + static_cast<int>(pc[0] / grid_size);
+          // 把对应的grid标记为有视觉地图点
           grid_num[index] = TYPE_MAP;
+          // 当前帧到地图点的视线观测向量
           Vector3d obs_vec(new_frame_->pos() - pt->pos_);
           float cur_dist = obs_vec.norm();
+          // 取距离最近的地图点作为grid的观测值
           if (cur_dist <= map_dist[index])
           {
             map_dist[index] = cur_dist;
@@ -479,10 +513,12 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
           }
         }
       }
+      // 如果整个体素中的地图点都不在fov内，就把这个体素标记为删除
       if (!voxel_in_fov) { DeleteKeyList.push_back(position); }
     }
   }
 
+  // 光线投射，默认没开
   // RayCasting Module
   if (raycast_en)
   {
@@ -502,6 +538,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
 
       for (const auto &it : rays_with_sample_points[i])
       {
+        // 采样点的世界坐标
         V3D sample_point_w = new_frame_->f2w(it);
         // sample_points_temp.push_back(sample_point_w);
 
@@ -513,12 +550,14 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
 
         VOXEL_LOCATION sample_pos(loc_xyz[0], loc_xyz[1], loc_xyz[2]);
 
+        // 采样点对应的体素中要有当前帧点云
         auto corre_sub_feat_map = sub_feat_map.find(sample_pos);
         if (corre_sub_feat_map != sub_feat_map.end()) break;
 
         auto corre_feat_map = feat_map.find(sample_pos);
         if (corre_feat_map != feat_map.end())
         {
+          // 采样点对应的体素中有视觉地图点，操作和上面的一样
           bool voxel_in_fov = false;
 
           std::vector<VisualPoint *> &voxel_points = corre_feat_map->second->voxel_points;
@@ -568,12 +607,14 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
         }
         else
         {
+          // 如果没有地图点，从voxelmap中查找对应的体素
           VOXEL_LOCATION sample_pos(loc_xyz[0], loc_xyz[1], loc_xyz[2]);
           auto iter = plane_map.find(sample_pos);
           if (iter != plane_map.end())
           {
             VoxelOctoTree *current_octo;
             current_octo = iter->second->find_correspond(sample_point_w);
+            // 如果对应对应voxel是平面，就把这个平面点缓存到add_from_voxel_map
             if (current_octo->plane_ptr_->is_plane_)
             {
               pointWithVar plane_center;
@@ -590,6 +631,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
     }
   }
 
+  // 把不在当前帧观测范围的体素删除
   for (auto &key : DeleteKeyList)
   {
     sub_feat_map.erase(key);
@@ -602,8 +644,10 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
   // double t_2, t_3, t_4, t_5;
   // t_2=t_3=t_4=t_5=0;
 
+  // 遍历所有网格
   for (int i = 0; i < length; i++)
   {
+    // 如果网格中观测到了视觉地图点
     if (grid_num[i] == TYPE_MAP)
     {
       // double t_1 = omp_get_wtime();
@@ -611,24 +655,30 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
       VisualPoint *pt = retrieve_voxel_points[i];
       // visual_sub_map_cur.push_back(pt); // before
 
+      // 地图点在当前帧图像的像素坐标
       V2D pc(new_frame_->w2c(pt->pos_));
 
       // cv::circle(img_cp, cv::Point2f(pc[0], pc[1]), 3, cv::Scalar(0, 0, 255), -1, 8); // Green Sparse Align tracked
 
+      // 地图点在当前帧相机系下的三维坐标
       V3D pt_cam(new_frame_->w2f(pt->pos_));
+      // 计算以地图点像素坐标为中心的patch的深度连续性
       bool depth_continous = false;
       for (int u = -patch_size_half; u <= patch_size_half; u++)
       {
         for (int v = -patch_size_half; v <= patch_size_half; v++)
         {
+          // patch中心，跳过
           if (u == 0 && v == 0) continue;
 
           float depth = it[width * (v + int(pc[1])) + u + int(pc[0])];
 
+          // 没有深度，跳过
           if (depth == 0.) continue;
 
           double delta_dist = abs(pt_cam[2] - depth);
 
+          // 超过阈值，认为不连续
           if (delta_dist > 0.5)
           {
             depth_continous = true;
@@ -642,7 +692,9 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
       // t_2 += omp_get_wtime() - t_1;
 
       // t_1 = omp_get_wtime();
+      // 参考帧
       Feature *ref_ftr;
+      // 由参考帧变换到当前帧的patch金字塔
       std::vector<float> patch_wrap(warp_len);
 
       int search_level;
@@ -650,16 +702,19 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
 
       if (!pt->is_normal_initialized_) continue;
 
+      // 法向量优化
       if (normal_en)
       {
         float phtometric_errors_min = std::numeric_limits<float>::max();
 
+        // 只有一个历史观测，就直接用这个观测作为固定参考帧
         if (pt->obs_.size() == 1)
         {
           ref_ftr = *pt->obs_.begin();
           pt->ref_patch = ref_ftr;
           pt->has_ref_patch_ = true;
         }
+        // 如果有多个历史观测，且还没有固定参考帧，就找一个和其他历史观测光度误差最小的作为参考帧
         else if (!pt->has_ref_patch_)
         {
           for (auto it = pt->obs_.begin(), ite = pt->obs_.end(); it != ite; ++it)
@@ -668,6 +723,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
             float *patch_temp = ref_patch_temp->patch_;
             float phtometric_errors = 0.0;
             int count = 0;
+            // 计算与历史观测的光度误差
             for (auto itm = pt->obs_.begin(), itme = pt->obs_.end(); itm != itme; ++itm)
             {
               if ((*itm)->id_ == ref_patch_temp->id_) continue;
@@ -689,17 +745,22 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
           pt->ref_patch = ref_ftr;
           pt->has_ref_patch_ = true;
         }
+        // 其他情况，就是已经有固定参考帧了，就用这个参考帧
         else { ref_ftr = pt->ref_patch; }
       }
       else
       {
+        // 在当前点的历史观测中，找一个与当前观测方向最近的一个观测作为参考帧，如果都大于60°，就跳过
         if (!pt->getCloseViewObs(new_frame_->pos(), ref_ftr, pc)) continue;
       }
 
+      // 法向量优化
       if (normal_en)
       {
+        // 地图点在参考帧相机系下的的法向量
         V3D norm_vec = (ref_ftr->T_f_w_.rotation_matrix() * pt->normal_).normalized();
         
+        // 地图点在参考帧相机系下的三维坐标
         V3D pf(ref_ftr->T_f_w_ * pt->pos_);
         // V3D pf_norm = pf.normalized();
         
@@ -707,14 +768,18 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
         // if(cos_theta < 0) norm_vec = -norm_vec;
         // if (abs(cos_theta) < 0.08) continue; // 0.5 60 degree 0.34 70 degree 0.17 80 degree 0.08 85 degree
 
+        // 参考帧到当前帧的变换，T_cur2ref
         SE3 T_cur_ref = new_frame_->T_f_w_ * ref_ftr->T_f_w_.inverse();
 
+        // 计算仿射变换矩阵
         getWarpMatrixAffineHomography(*cam, ref_ftr->px_, pf, norm_vec, T_cur_ref, 0, A_cur_ref_zero);
 
+        // 计算最佳搜索层级
         search_level = getBestSearchLevel(A_cur_ref_zero, 2);
       }
       else
       {
+        //??? 这里的id_存的是图像帧的id，即使对于相同的参考帧和当前帧，不同patch的中心像素、深度不同，仿射变换矩阵应该也不一样，应该不能复用
         auto iter_warp = warp_map.find(ref_ftr->id_);
         if (iter_warp != warp_map.end())
         {
@@ -736,13 +801,16 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
 
       // t_1 = omp_get_wtime();
 
+      // 计算参考帧转换过来的patch_wrap
       for (int pyramid_level = 0; pyramid_level <= patch_pyrimid_level - 1; pyramid_level++)
       {
         warpAffine(A_cur_ref_zero, ref_ftr->img_, ref_ftr->px_, ref_ftr->level_, search_level, pyramid_level, patch_size_half, patch_wrap.data());
       }
 
+      // 提取当前帧patch
       getImagePatch(img, pc, patch_buffer.data(), 0);
 
+      // 计算光度误差
       float error = 0.0;
       for (int ind = 0; ind < patch_size_total; ind++)
       {
@@ -750,6 +818,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
                  (ref_ftr->inv_expo_time_ * patch_wrap[ind] - state->inv_expo_time * patch_buffer[ind]);
       }
 
+      // ncc匹配
       if (ncc_en)
       {
         double ncc = calculateNCC(patch_wrap.data(), patch_buffer.data(), patch_size_total);
@@ -760,8 +829,10 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
         }
       }
 
+      // 光度误差阈值判断
       if (error > outlier_threshold * patch_size_total) continue;
 
+      // 保存残差
       visual_submap->voxel_points.push_back(pt);
       visual_submap->propa_errors.push_back(error);
       visual_submap->search_levels.push_back(search_level);
@@ -797,7 +868,9 @@ void VIOManager::computeJacobianAndUpdateEKF(cv::Mat img)
     else
       updateState(img, level);
   }
+  // 更新协方差
   state->cov -= G * state->cov;
+  // 更新当前帧的状态
   updateFrameState(*state);
 }
 
@@ -811,16 +884,20 @@ void VIOManager::generateVisualMapPoints(cv::Mat img, vector<pointWithVar> &pg)
     if (pg[i].normal == V3D(0, 0, 0)) continue;
 
     V3D pt = pg[i].point_w;
+    // 点云在当前帧图像上的像素坐标
     V2D pc(new_frame_->w2c(pt));
 
     if (new_frame_->cam_->isInFrame(pc.cast<int>(), border)) // 20px is the patch size in the matcher
     {
       int index = static_cast<int>(pc[1] / grid_size) * grid_n_width + static_cast<int>(pc[0] / grid_size);
 
+      // 对应的grid中没有视觉地图点，就添加到地图中
       if (grid_num[index] != TYPE_MAP)
       {
+        // 计算角点得分
         float cur_value = vk::shiTomasiScore(img, pc[0], pc[1]);
         // if (cur_value < 5) continue;
+        // 一个grid只能添加一个视觉地图点，取角点得分最高的
         if (cur_value > scan_value[index])
         {
           scan_value[index] = cur_value;
@@ -831,6 +908,7 @@ void VIOManager::generateVisualMapPoints(cv::Mat img, vector<pointWithVar> &pg)
     }
   }
 
+  // 开启光线投射时，从voxelmap中添加的点，和上面相同操作
   for (int j = 0; j < visual_submap->add_from_voxel_map.size(); j++)
   {
     V3D pt = visual_submap->add_from_voxel_map[j].point_w;
@@ -856,6 +934,7 @@ void VIOManager::generateVisualMapPoints(cv::Mat img, vector<pointWithVar> &pg)
   // double t_b1 = omp_get_wtime() - t0;
   // t0 = omp_get_wtime();
 
+  // 遍历所有网格
   int add = 0;
   for (int i = 0; i < length; i++)
   {
@@ -864,6 +943,7 @@ void VIOManager::generateVisualMapPoints(cv::Mat img, vector<pointWithVar> &pg)
       pointWithVar pt_var = append_voxel_points[i];
       V3D pt = pt_var.point_w;
 
+      // 点云的法向量转换到当前帧相机坐标系下
       V3D norm_vec(new_frame_->T_f_w_.rotation_matrix() * pt_var.normal);
       V3D dir(new_frame_->T_f_w_ * pt);
       dir.normalize();
@@ -877,6 +957,7 @@ void VIOManager::generateVisualMapPoints(cv::Mat img, vector<pointWithVar> &pg)
       VisualPoint *pt_new = new VisualPoint(pt);
 
       Vector3d f = cam->cam2world(pc);
+      // 把当前帧作为这个新的地图点的观测
       Feature *ftr_new = new Feature(pt_new, patch, pc, f, new_frame_->T_f_w_, 0);
       ftr_new->img_ = img;
       ftr_new->id_ = new_frame_->id_;
@@ -886,11 +967,13 @@ void VIOManager::generateVisualMapPoints(cv::Mat img, vector<pointWithVar> &pg)
       pt_new->covariance_ = pt_var.var;
       pt_new->is_normal_initialized_ = true;
 
+      // 点云法向量与相机视线的夹角大于90°，取反
       if (cos_theta < 0) { pt_new->normal_ = -pt_var.normal; }
       else { pt_new->normal_ = pt_var.normal; }
       
       pt_new->previous_normal_ = pt_new->normal_;
 
+      // 加入到视觉地图中
       insertPointIntoVoxelMap(pt_new);
       add += 1;
       // map_cur_frame.push_back(pt_new);
@@ -915,6 +998,7 @@ void VIOManager::updateVisualMapPoints(cv::Mat img)
   {
     VisualPoint *pt = visual_submap->voxel_points[i];
     if (pt == nullptr) continue;
+    // 如果一个地图点已经收敛了，就删除其所有非参考帧的观测
     if (pt->is_converged_)
     { 
       pt->deleteNonRefPatchFeatures();
@@ -931,6 +1015,7 @@ void VIOManager::updateVisualMapPoints(cv::Mat img)
     Feature *last_feature = pt->obs_.back();
     // if(new_frame_->id_ >= last_feature->id_ + 10) add_flag = true; // 10
 
+    // 比上一次观测的距离或角度差大于阈值
     // Step 2: delta_pose
     SE3 pose_ref = last_feature->T_f_w_;
     SE3 delta_pose = pose_ref * pose_cur.inverse();
@@ -938,12 +1023,14 @@ void VIOManager::updateVisualMapPoints(cv::Mat img)
     double delta_theta = (delta_pose.rotation_matrix().trace() > 3.0 - 1e-6) ? 0.0 : std::acos(0.5 * (delta_pose.rotation_matrix().trace() - 1));
     if (delta_p > 0.5 || delta_theta > 0.3) add_flag = true; // 0.5 || 0.3
 
+    // 在图像中的像素坐标位置差也大于阈值
     // Step 3: pixel distance
     Vector2d last_px = last_feature->px_;
     double pixel_dist = (pc - last_px).norm();
     if (pixel_dist > 40) add_flag = true;
 
     // Maintain the size of 3D point observation features.
+    // 如果一个点图点的观测大于30个就删除得分最低的观测
     if (pt->obs_.size() >= 30)
     {
       Feature *ref_ftr;
@@ -954,8 +1041,10 @@ void VIOManager::updateVisualMapPoints(cv::Mat img)
     if (add_flag)
     {
       update_num += 1;
+      // 标记需要更新的地图点
       update_flag[i] = 1;
       Vector3d f = cam->cam2world(pc);
+      // 为地图点添加新的观测
       Feature *ftr_new = new Feature(pt, patch_temp, pc, f, new_frame_->T_f_w_, visual_submap->search_levels[i]);
       ftr_new->img_ = img;
       ftr_new->id_ = new_frame_->id_;
@@ -974,10 +1063,10 @@ void VIOManager::updateReferencePatch(const unordered_map<VOXEL_LOCATION, VoxelO
   {
     VisualPoint *pt = visual_submap->voxel_points[i];
 
-    if (!pt->is_normal_initialized_) continue;
-    if (pt->is_converged_) continue;
-    if (pt->obs_.size() <= 5) continue;
-    if (update_flag[i] == 0) continue;
+    if (!pt->is_normal_initialized_) continue; // 没有法向量，跳过
+    if (pt->is_converged_) continue;           // 已经收敛，跳过
+    if (pt->obs_.size() <= 5) continue;        // 观测数小于5，跳过
+    if (update_flag[i] == 0) continue;         // 没有新加的观测，跳过
 
     const V3D &p_w = pt->pos_;
     float loc_xyz[3];
@@ -986,12 +1075,14 @@ void VIOManager::updateReferencePatch(const unordered_map<VOXEL_LOCATION, VoxelO
       loc_xyz[j] = p_w[j] / 0.5;
       if (loc_xyz[j] < 0) { loc_xyz[j] -= 1.0; }
     }
+    // 找到地图点在voxelmap中的位置
     VOXEL_LOCATION position((int64_t)loc_xyz[0], (int64_t)loc_xyz[1], (int64_t)loc_xyz[2]);
     auto iter = plane_map.find(position);
     if (iter != plane_map.end())
     {
       VoxelOctoTree *current_octo;
       current_octo = iter->second->find_correspond(p_w);
+      // 如果所在节点是平面
       if (current_octo->plane_ptr_->is_plane_)
       {
         VoxelPlane &plane = *current_octo->plane_ptr_;
@@ -999,15 +1090,20 @@ void VIOManager::updateReferencePatch(const unordered_map<VOXEL_LOCATION, VoxelO
         float dis_to_plane_abs = fabs(dis_to_plane);
         float dis_to_center = (plane.center_(0) - p_w(0)) * (plane.center_(0) - p_w(0)) +
                               (plane.center_(1) - p_w(1)) * (plane.center_(1) - p_w(1)) + (plane.center_(2) - p_w(2)) * (plane.center_(2) - p_w(2));
+        // 投影到平面上后距离平面中心的距离
         float range_dis = sqrt(dis_to_center - dis_to_plane * dis_to_plane);
+        // 条件1:到平面中心距离小于3σ
         if (range_dis <= 3 * plane.radius_)
         {
+          // 计算点面距离的协方差
           Eigen::Matrix<double, 1, 6> J_nq;
           J_nq.block<1, 3>(0, 0) = p_w - plane.center_;
           J_nq.block<1, 3>(0, 3) = -plane.normal_;
           double sigma_l = J_nq * plane.plane_var_ * J_nq.transpose();
           sigma_l += plane.normal_.transpose() * pt->covariance_ * plane.normal_;
 
+          // 条件2:点面距离小于3σ
+          // 则认为点在平面上
           if (dis_to_plane_abs < 3 * sqrt(sigma_l))
           {
             // V3D norm_vec(new_frame_->T_f_w_.rotation_matrix() * plane.normal_);
@@ -1016,6 +1112,7 @@ void VIOManager::updateReferencePatch(const unordered_map<VOXEL_LOCATION, VoxelO
             // V3D norm_vec_ref(pt->ref_patch->T_f_w_.rotation_matrix() *
             // plane.normal); double cos_ref = pf_ref.dot(norm_vec_ref);
             
+            // 取平面的法向量作为地图点的法向量
             if (pt->previous_normal_.dot(plane.normal_) < 0) { pt->normal_ = -plane.normal_; }
             else { pt->normal_ = plane.normal_; }
 
@@ -1023,6 +1120,7 @@ void VIOManager::updateReferencePatch(const unordered_map<VOXEL_LOCATION, VoxelO
 
             pt->previous_normal_ = pt->normal_;
 
+            // 如果法向量更新小于0.0001，或者观测数大于10，则认为收敛
             if (normal_update < 0.0001 && pt->obs_.size() > 10)
             {
               pt->is_converged_ = true;
@@ -1032,6 +1130,8 @@ void VIOManager::updateReferencePatch(const unordered_map<VOXEL_LOCATION, VoxelO
         }
       }
     }
+    //! 上面意味着一个地图点在有5个以上的观测时，才有可能用平面法向量更新地图点的法向量
+
 
     float score_max = -1000.;
     for (auto it = pt->obs_.begin(), ite = pt->obs_.end(); it != ite; ++it)
@@ -1052,6 +1152,7 @@ void VIOManager::updateReferencePatch(const unordered_map<VOXEL_LOCATION, VoxelO
       // if(fabs(cos_angle) < 0.86) continue; // 20 degree
 
       float ref_mean;
+      // 计算地图点在参考帧上的patch的均值
       if (abs(ref_patch_temp->mean_) < 1e-6)
       {
         float ref_sum = std::accumulate(patch_temp, patch_temp + patch_size_total, 0.0);
@@ -1059,6 +1160,7 @@ void VIOManager::updateReferencePatch(const unordered_map<VOXEL_LOCATION, VoxelO
         ref_patch_temp->mean_ = ref_mean;
       }
 
+      // 和所有其他观测计算NCC
       for (auto itm = pt->obs_.begin(), itme = pt->obs_.end(); itm != itme; ++itm)
       {
         if ((*itm)->id_ == ref_patch_temp->id_) continue;
@@ -1072,6 +1174,7 @@ void VIOManager::updateReferencePatch(const unordered_map<VOXEL_LOCATION, VoxelO
           (*itm)->mean_ = other_mean;
         }
 
+        // 计算NCC
         for (int ind = 0; ind < patch_size_total; ind++)
         {
           NCC_up += (patch_temp[ind] - ref_mean) * (patch_cache[ind] - other_mean);
@@ -1084,10 +1187,14 @@ void VIOManager::updateReferencePatch(const unordered_map<VOXEL_LOCATION, VoxelO
 
       NCC = NCC / count;
 
+      //! 单次观测的评分：平均NCC + 地图点在参考帧相机系下的向量长度*相机的视线和地图点法向量夹角的cos值
+      // 平均NCC越大，地图点在参考帧相机的视线和法向量夹角越小，地图点与参考帧的距离越大，得分越高
       score = NCC + cos_angle;
 
       ref_patch_temp->score_ = score;
 
+      // 取得分最高的作为该地图点的固定参考帧ref_patch
+      // 如果开启了法向量优化，则只有一个观测时也会被当作固定参考帧，然后有5个以上观测时才会更新固定参考帧
       if (score > score_max)
       {
         score_max = score;
@@ -1133,12 +1240,15 @@ void VIOManager::projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, Vo
       Feature *ref_ftr;
       ref_ftr = pt->ref_patch;
       // Feature* ref_ftr;
+      // 更新后的像素坐标
       V2D pc(new_frame_->w2c(pt->pos_));
+      // 更新前的像素坐标
       V2D pc_prior(new_frame_->w2c_prior(pt->pos_));
 
       V3D norm_vec(ref_ftr->T_f_w_.rotation_matrix() * pt->normal_);
       V3D pf(ref_ftr->T_f_w_ * pt->pos_);
 
+      // 法向量与相机视线的夹角大于90°，取反
       if (pf.dot(norm_vec) < 0) norm_vec = -norm_vec;
 
       // norm_vec << norm_vec(1), norm_vec(0), norm_vec(2);
@@ -1152,6 +1262,7 @@ void VIOManager::projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, Vo
       // const Matrix2f A_ref_cur = A_cur_ref.inverse().cast<float>();
       int search_level = getBestSearchLevel(A_cur_ref.inverse(), 2);
 
+      // 仿射变换后面积变化太大，跳过
       double D = A_cur_ref.determinant();
       if (D > 3) continue;
 
@@ -1159,19 +1270,23 @@ void VIOManager::projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, Vo
 
       cv::Mat ref_cur_combine_temp;
       int radius = 20;
+      // 把当前帧和参考帧拼到一起
       cv::hconcat(img_cur, img_ref, ref_cur_combine_temp);
       cv::cvtColor(ref_cur_combine_temp, ref_cur_combine_temp, CV_GRAY2BGR);
 
+      // 从当前帧中提取patch
       getImagePatch(img_cur, pc, patch_buffer.data(), 0);
 
       float error_est = 0.0;
       float error_gt = 0.0;
 
+      // 计算残差
       for (int ind = 0; ind < patch_size_total; ind++)
       {
         error_est += (ref_ftr->inv_expo_time_ * visual_submap->warp_patch[i][ind] - state->inv_expo_time * patch_buffer[ind]) *
                      (ref_ftr->inv_expo_time_ * visual_submap->warp_patch[i][ind] - state->inv_expo_time * patch_buffer[ind]);
       }
+      // 后面就是各种显示
       std::string ref_est = "ref_est " + std::to_string(1.0 / ref_ftr->inv_expo_time_);
       std::string cur_est = "cur_est " + std::to_string(1.0 / state->inv_expo_time);
       std::string cur_propa = "cur_gt " + std::to_string(error_gt);
@@ -1520,6 +1635,7 @@ void VIOManager::updateStateInverse(cv::Mat img, int level)
 void VIOManager::updateState(cv::Mat img, int level)
 {
   if (total_points == 0) return;
+  // 上一次迭代的状态
   StatesGroup old_state = (*state);
 
   VectorXd z;
@@ -1541,7 +1657,7 @@ void VIOManager::updateState(cv::Mat img, int level)
     V3D Pwi(state->pos_end);
     Rcw = Rci * Rwi.transpose();
     Pcw = -Rci * Rwi.transpose() * Pwi + Pci;
-    Jdp_dt = Rci * Rwi.transpose();
+    Jdp_dt = Rci * Rwi.transpose(); // ∂ρ/∂t = -R_cw
     
     float error = 0.0;
     int n_meas = 0;
@@ -1551,14 +1667,18 @@ void VIOManager::updateState(cv::Mat img, int level)
   
     #ifdef MP_EN
       omp_set_num_threads(MP_PROC_NUM);
+      // error, n_meas 这两个变量做加法归约。即每个线程分别计算，最后所有线程的结果会自动累加到一起，得到最终结果
       #pragma omp parallel for reduction(+:error, n_meas)
     #endif
     for (int i = 0; i < total_points; i++)
     {
       // printf("thread is %d, i=%d, i address is %p\n", omp_get_thread_num(), i, &i);
-      MD(1, 2) Jimg;
-      MD(2, 3) Jdpi;
-      MD(1, 3) Jdphi, Jdp, JdR, Jdt;
+      MD(1, 2) Jimg; // 像素梯度，∂I/∂p
+      MD(2, 3) Jdpi; // 投影点对三维点的雅克比，∂p/∂q
+      MD(1, 3) Jdphi; // 残差对SE3旋转部分的雅克比，∂e/∂φ
+      MD(1, 3) Jdp; // 残差对SE3平移的雅克比，∂e/∂ρ
+      MD(1, 3) JdR; // 残差对IMU旋转的雅克比，∂e/∂R
+      MD(1, 3) Jdt; // 残差对IMU平移的雅克比，∂e/∂t
 
       float patch_error = 0.0;
       int search_level = visual_submap->search_levels[i];
@@ -1570,11 +1690,14 @@ void VIOManager::updateState(cv::Mat img, int level)
 
       if (pt == nullptr) continue;
 
+      // 地图点在当前帧相机系下的三维坐标，q
       V3D pf = Rcw * pt->pos_ + Pcw;
+      // 地图点在当前帧图像上的像素坐标，I
       V2D pc = cam->world2cam(pf);
 
+      // 计算Jdpi
       computeProjectionJacobian(pf, Jdpi);
-      M3D p_hat;
+      M3D p_hat; // q^
       p_hat << SKEW_SYM_MATRX(pf);
 
       float u_ref = pc[0];
@@ -1597,6 +1720,7 @@ void VIOManager::updateState(cv::Mat img, int level)
         uint8_t *img_ptr = (uint8_t *)img.data + (v_ref_i + x * scale - patch_size_half * scale) * width + u_ref_i - patch_size_half * scale;
         for (int y = 0; y < patch_size; ++y, img_ptr += scale)
         {
+          // 先用双线性插值计算像素，然后使用中值差分计算像素梯度
           float du =
               0.5f *
               ((w_ref_tl * img_ptr[scale] + w_ref_tr * img_ptr[scale * 2] + w_ref_bl * img_ptr[scale * width + scale] +
@@ -1611,13 +1735,16 @@ void VIOManager::updateState(cv::Mat img, int level)
           Jimg << du, dv;
           Jimg = Jimg * state->inv_expo_time;
           Jimg = Jimg * inv_scale;
-          Jdphi = Jimg * Jdpi * p_hat;
-          Jdp = -Jimg * Jdpi;
-          JdR = Jdphi * Jdphi_dR + Jdp * Jdp_dR;
-          Jdt = Jdp * Jdp_dt;
+          Jdphi = Jimg * Jdpi * p_hat;            // ∂e/∂φ = ∂I/∂p * ∂p/∂q * ∂q/∂φ，差了个负号，其中 ∂q/∂φ = -q^
+          Jdp = -Jimg * Jdpi;                     // ∂e/∂p = ∂I/∂p * ∂p/∂q * ∂q/∂ρ，差了个负号，其中 ∂q/∂ρ = I
+          //! ∂φ/∂R, ∂ρ/∂R, ∂ρ/∂t 都差了个负号，但是 ∂e/∂φ 和 ∂e/∂p 也差了个负号，所以结果是对的
+          JdR = Jdphi * Jdphi_dR + Jdp * Jdp_dR;  // ∂e/∂R = ∂e/∂φ * ∂φ/∂R + ∂e/∂ρ * ∂ρ/∂R，其中 ∂φ/∂R = -R_ci，∂ρ/∂R = R_ci * t_ic^
+          Jdt = Jdp * Jdp_dt;                     // ∂e/∂t = ∂e/∂ρ * ∂ρ/∂t，其中 ∂ρ/∂t = -R_cw
 
+          // 当前帧灰度，双线性插值
           double cur_value =
               w_ref_tl * img_ptr[0] + w_ref_tr * img_ptr[scale] + w_ref_bl * img_ptr[scale * width] + w_ref_br * img_ptr[scale * width + scale];
+          // 计算残差，当前帧 - 参考帧
           double res = state->inv_expo_time * cur_value - inv_ref_expo * P[patch_size_total * level + x * patch_size + y];
 
           z(i * patch_size_total + x * patch_size + y) = res;
@@ -1625,6 +1752,7 @@ void VIOManager::updateState(cv::Mat img, int level)
           patch_error += res * res;
           n_meas += 1;
           
+          // 估计曝光时间的话多一列
           if (exposure_estimate_en) { H_sub.block<1, 7>(i * patch_size_total + x * patch_size + y, 0) << JdR, Jdt, cur_value; }
           else { H_sub.block<1, 6>(i * patch_size_total + x * patch_size + y, 0) << JdR, Jdt; }
         }
@@ -1654,6 +1782,7 @@ void VIOManager::updateState(cv::Mat img, int level)
       // vec = (*state_propagat) - (*state); G = K*H;
       // (*state) += (-K*z + vec - G*vec);
 
+      // 加了一个曝光时间状态量，矩阵维度上有点变化，其他一样
       auto &&H_sub_T = H_sub.transpose();
       H_T_H.setZero();
       G.setZero();
@@ -1693,6 +1822,7 @@ void VIOManager::updateFrameState(StatesGroup state)
   V3D Pwi(state.pos_end);
   Rcw = Rci * Rwi.transpose();
   Pcw = -Rci * Rwi.transpose() * Pwi + Pci;
+  // 更新当前帧的状态
   new_frame_->T_f_w_ = SE3(Rcw, Pcw);
 }
 
@@ -1722,6 +1852,7 @@ void VIOManager::plotTrackedPoints()
     VisualPoint *pt = visual_submap->voxel_points[i];
     V2D pc(new_frame_->w2c(pt->pos_));
 
+    // 如果优化之后patch的残差变小了，就显示为绿色，否则显示为蓝色
     if (visual_submap->errors[i] <= visual_submap->propa_errors[i])
     {
       // inlier_count++;
@@ -1785,6 +1916,7 @@ void VIOManager::dumpDataForColmap()
 
 void VIOManager::processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &feat_map, double img_time)
 {
+  // 检查图像size
   if (width != img.cols || height != img.rows)
   {
     if (img.empty()) printf("[ VIO ] Empty Image!\n");
@@ -1794,41 +1926,51 @@ void VIOManager::processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unor
   img_cp = img.clone();
   // img_test = img.clone();
 
+  // rgb转灰度图
   if (img.channels() == 3) cv::cvtColor(img, img, CV_BGR2GRAY);
 
   new_frame_.reset(new Frame(cam, img));
   updateFrameState(*state);
   
+  // 重置图像grid
   resetGrid();
 
   double t1 = omp_get_wtime();
 
+  // 取地图点
   retrieveFromVisualSparseMap(img, pg, feat_map);
 
   double t2 = omp_get_wtime();
 
+  // IESFK更新
   computeJacobianAndUpdateEKF(img);
 
   double t3 = omp_get_wtime();
 
+  // 添加新的地图点
   generateVisualMapPoints(img, pg);
 
   double t4 = omp_get_wtime();
   
+  // 显示当前帧 tracking 的地图点
   plotTrackedPoints();
 
+  // 调试用的画图
   if (plot_flag) projectPatchFromRefToCur(feat_map);
 
   double t5 = omp_get_wtime();
 
+  // 给旧的地图点添加当前帧的观测
   updateVisualMapPoints(img);
 
   double t6 = omp_get_wtime();
 
+  // 更新旧的地图点的法向量和固定参考帧
   updateReferencePatch(feat_map);
 
   double t7 = omp_get_wtime();
   
+  // colmap格式数据和图片保存
   if(colmap_output_en)  dumpDataForColmap();
 
   frame_count++;

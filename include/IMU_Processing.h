@@ -37,7 +37,7 @@ public:
   void Reset();
   void Reset(double start_timestamp, const sensor_msgs::ImuConstPtr &lastimu);
   /**
-   * @brief 设置 T_imu2lidar 外参
+   * @brief 设置 T_imu_lidar 外参
    * 
    * @param transl 
    * @param rot 
